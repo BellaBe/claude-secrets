@@ -35,15 +35,40 @@ secret.sh migrate <channel> <ENV_KEY> <pass_key>
 
 ### Store
 
+**Always quote values** — tokens contain colons and special characters that the shell will split or truncate without quotes:
+
 ```bash
 cd ~/claude-secrets
 
-./secret.sh set telegram bot-token "123456789:AAH..."
+# ✓ Correct — quoted
+./secret.sh set telegram bot-token "123456789:AAHfiqksKZ8..."
 ./secret.sh set telegram admin-id "987654321"
+
+# ✗ Wrong — token gets truncated at the colon
+./secret.sh set telegram bot-token 123456789:AAHfiqksKZ8...
+```
+
+More examples:
+
+```bash
 ./secret.sh set slack bot-token "xoxb-..."
 ./secret.sh set slack signing-secret "abc123..."
 ./secret.sh set discord bot-token "MTk..."
 ```
+
+### Verify after storing
+
+Always verify the token works after storing:
+
+```bash
+# Telegram
+curl "https://api.telegram.org/bot$(pass show claude-telegram/bot-token)/getMe"
+
+# Discord
+curl -H "Authorization: Bot $(pass show claude-discord/bot-token)" https://discord.com/api/v10/users/@me
+```
+
+If you get a 404 or 401, the token is wrong — re-store it with quotes.
 
 ### Retrieve
 
@@ -103,6 +128,35 @@ exec bun run server.ts
 
 The `${VAR:-$(...)}` pattern respects env vars already set by Docker, CI, or manual overrides.
 
+### GPG passphrase and subprocesses
+
+Claude Code spawns the start script as a subprocess with no TTY. If GPG needs your passphrase and the cache is empty, it can't prompt you — the start script fails silently.
+
+**Prime the cache before starting Claude Code:**
+
+```bash
+pass show claude-telegram/bot-token > /dev/null && claude --dangerously-load-development-channels server:telegram
+```
+
+Or create a one-liner alias:
+
+```bash
+alias claude-tg='pass show claude-telegram/bot-token > /dev/null && claude --dangerously-load-development-channels server:telegram'
+```
+
+### Lock down GPG cache timeout
+
+By default GPG remembers your passphrase for a long time. Shorten it so the decryption window closes before Claude's session is fully running:
+
+```bash
+echo "default-cache-ttl 60
+max-cache-ttl 300" > ~/.gnupg/gpg-agent.conf
+
+gpg-connect-agent reloadagent /bye
+```
+
+Passphrase expires 60 seconds after you type it. The start script decrypts at launch, the cache clears, and Claude can't decrypt anything even if it tries.
+
 ## Security model
 
 | Layer | Claude can access? |
@@ -110,6 +164,23 @@ The `${VAR:-$(...)}` pattern respects env vars already set by Docker, CI, or man
 | `~/.claude/channels/*/.env` | **Yes** — flat file |
 | `~/.password-store/*.gpg` | **No** — GPG-encrypted |
 | `process.env` at runtime | **No** — in-memory only |
+| `/proc/<pid>/environ` | **Technically** — but requires finding the PID and parsing binary format |
+
+The token never hits disk in plain text. Flow: encrypted file → pipe → shell memory → server memory.
+
+## Troubleshooting
+
+**"Secrets not found" when Claude Code starts**
+GPG cache expired. Prime it: `pass show claude-telegram/bot-token > /dev/null` then reconnect.
+
+**Token stored but API returns 404**
+Token was truncated — you likely stored it without quotes. Re-store with quotes around the value.
+
+**`pass insert` succeeds but `pass show` is empty**
+Old version of the script without `-e` flag. Update `secret.sh` and re-store.
+
+**Migration ran but no secrets stored**
+Same `-e` flag issue. Use `secret.sh set` to store manually.
 
 ## Directory
 
