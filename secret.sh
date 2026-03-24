@@ -48,8 +48,12 @@ check_pass
 case "$1" in
   set)
     [[ $# -lt 4 ]] && { red "Usage: $(basename "$0") set <channel> <key> <value>"; exit 1; }
-    printf '%s\n' "$4" | pass insert -f "${PREFIX}-$2/$3" 2>/dev/null
-    green "✓ ${PREFIX}-$2/$3"
+    if printf '%s\n' "$4" | pass insert -f -e "${PREFIX}-$2/$3"; then
+      green "✓ ${PREFIX}-$2/$3"
+    else
+      red "✗ failed to store ${PREFIX}-$2/$3"
+      exit 1
+    fi
     ;;
 
   get)
@@ -89,8 +93,12 @@ case "$1" in
       exit 1
     fi
 
-    printf '%s\n' "$value" | pass insert -f "${PREFIX}-${channel}/${pass_key}" 2>/dev/null
-    green "✓ ${env_key} → ${PREFIX}-${channel}/${pass_key}"
+    if printf '%s\n' "$value" | pass insert -f -e "${PREFIX}-${channel}/${pass_key}"; then
+      green "✓ ${env_key} → ${PREFIX}-${channel}/${pass_key}"
+    else
+      red "✗ failed to store ${PREFIX}-${channel}/${pass_key}"
+      exit 1
+    fi
 
     tmp="${env_file}.tmp"
     grep -v "^${env_key}=" "$env_file" > "$tmp" 2>/dev/null || true
